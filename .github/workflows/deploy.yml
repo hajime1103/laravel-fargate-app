@@ -7,6 +7,9 @@ on:
 
 env:
   AWS_REGION: ap-northeast-1
+  IMAGE_TAG: ${{ github.sha }} # github.sha には、ワークフローの実行のきっかけとなったコミット SHAが入っています
+  SYSTEM_NAME: example
+  SERVICE_NAME: foobar
 jobs:
   deploy:
     name: Deploy app to AWS Fargate
@@ -24,3 +27,45 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ secrets.PROD_AWS_ASSUME_ROLE_ARN }} # role-to-assume には Assume Role する対象の IAM ロールの ARN を指定します。今回 のケースであれば、arn:aws:iam::AWS アカウント ID:role/example-prod-foobar-deployer となります
           role-duration-seconds: 1800 # Assume Role によって得られる一時的な権限の有効期間を 指定します。30 分あれば最終的に Fargate へのデプロイも完了できそうなので、本書では 1800 秒 (30 分) を指定することにします。なお、省略した場合は、aws-actions/configure- aws-credentials を使った Assume Role のデフォルト値が適用され、その有効期間は 6 時間 となります
+      - name: Set env vars for prod
+        # if: github.ref == 'refs/heads/main'
+        run: echo "ENV_NAME=prod" >> $GITHUB_ENV # $GITHUB_ENV に環境変数名と値のペアを書き込むことで、GitHub Actions で使用される環境変数を追加できます。
+      - uses: actions/checkout@v2 # GitHub 公式のアクションのひとつである actions/checkout を使用し、GitHub Actions の環境に laravel-fargate-app リポジトリのコードをチェックアウト
+      - run: docker-compose up -d --build app web
+      - name: Cache composer # PHP 関連のパッケージをキャッシュし、次回のジョブ起動時に内容をチェック して、インストールすべき対象に変更が無ければ、キャッシュを利用するようにします
+        id: cache-composer
+        uses: actions/cache@v2 # actions/cache は記述したステップだけでなく、ジョブ全体の終了時にも自動で後処理を行います
+        with:
+          path: backend/vendor
+          key: composer-v1-${{ hashFiles('backend/composer.lock') }}
+      - run: docker-compose exec -T app composer install -n --prefer-dist --no-dev
+        if: ${{ !steps.cache-composer.outputs.cache-hit }} # アクションの中には output を持つものがあり、actions/cache の場合、cache-hit という output を持ちます。cache-hit には、キャッシュヒットしたかどうかが論理値で入ってい ます。
+        # そこで、PHP 関連パッケージのインストール処理のステップに if を加え、cache-hit が true で無ければ (キャッシュヒットしていなければ)、インストールを行うようにしてい ます
+        # るステップの outputs を参照する際には、「steps.{そのステップの id}.outputs.{output の名前}」といったように、ステップの id が必要です。そのため、actions/cache を使って いるステップに、「id: cache-composer」を加えるようにしています
+      - name: Cache npm
+        id: cache-npm-ci
+        uses: actions/cache@v2
+        with:
+          path: backend/node_modules
+          key: npm-v1-${{ hashFiles('backend/package-lock.json') }}
+      - run: docker-compose exec -T web npm ci
+        if: ${{ !steps.cache-npm-ci.outputs.cache-hit }}
+      - run: docker-compose exec -T web npm run prod # npm run prod は、本番環境向けのコマンドとなり、生成される JavaScript のファイルサ イズが小さくなります
+      - uses: aws-actions/amazon-ecr-login@v1 # aws-actions/amazon-ecr-login を使うことで、ECR にログインできます。なお、認証情 報は、以前のステップで使用した aws-actions/configure-aws-credentials で設定されたもの が使用されます
+        id: amazon-ecr-login
+      - name: Push nginx image to ecr
+        env:
+          DOCKER_BUILDKIT: 1 # BuildKit というものを使用してイメージのビルドを行います。BuildKit を使 う場合、環境変数 DOCKER_BUILDKIT に 1 を設定する必要があります
+          ECR_REGISTRY: ${{ steps.amazon-ecr-login.outputs.registry }} # ECR へ の イ メ ー ジ の プ ッ シ ュ は 、本 書 で は「docker push $ECR_REGISTRY/$ECR_REPOSITORY:{タ グ}」と い う コ マ ン ド で 実 行 し て い ます。この時、環境変数 ECR_REGISTRY には、「AWS のアカウント ID.dkr.ecr.ap- northeast-1.amazonaws.com」という値が入っている必要があります。この値は、aws-actions/amazon-ecr-login の output である、registry から取得できます。そのため、 以下のように環境変数 ECR_REGISTRY に値を設定しています
+          ECR_REPOSITORY: ${{ env.SYSTEM_NAME }}-${{ env.ENV_NAME }}-${{ env.SERVICE_NAME }}-nginx # 環境変数 ECR_REPOSITORY には、プッシュ先の ECR の名前 (リポジトリ名) が入っ ている必要があります。nginx のイメージをプッシュする先の ECR の名前は、example- prod-foobar-nginx です。そのため、以下のように環境変数 ECR_REPOSITORY に値を 設定しています
+        run: |
+          docker build \
+            --cache-from=$ECR_REGISTRY/$ECR_REPOSITORY:latest --build-arg BUILDKIT_INLINE_CACHE=1 . \
+            -f infra/docker/nginx/Dockerfile \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        # BuildKit では、--cache-from オプション*6を使用できます。本書では、--cache-from オ プションに、ECR にプッシュ済みの最新イメージを指定しています。これにより、そのイ メージをプルしてきて、これから行うビルドでのキャッシュとして利用できるようになりま す。結果、ビルド時間の短縮が見込めます。
+        # なお、--cache-from オプションに指定してキャッシュとして利用するイメージは、「-- build-arg BUILDKIT_INLINE_CACHE=1」を付けてビルドされている必要があります
+        # -t オプションで、イメージにタグ付けを行います。本書では、タグとして latest と、コミット SHA を付けるようにしています。

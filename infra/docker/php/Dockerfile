@@ -28,4 +28,8 @@ RUN apt-get update && \
 COPY ./infra/docker/php/php-fpm.d/zzz-www.conf /usr/local/etc/php-fpm.d/zzz-www.conf
 COPY ./infra/docker/php/php.ini /usr/local/etc/php/php.ini
 
+COPY --chown=www-data:www-data ./backend /work/backend
+
+# コピーするだけでなく、--chown オプションを付けて、/work/backend ディレ クトリのオーナーとグループが root ではなく www-data になるようにしています。なぜそ のようなことをしているかというと、Laravel が動いている時、backend ディレクトリ配下 の storage ディレクトリや bootstrap/cache ディレクトリ内にファイルが書き込まれること があるのですが、その書き込み処理が権限エラーとならないようにするためです。
+
 WORKDIR /work/backend
