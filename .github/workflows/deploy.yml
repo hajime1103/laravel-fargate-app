@@ -68,3 +68,17 @@ jobs:
         # BuildKit では、--cache-from オプション*6を使用できます。本書では、--cache-from オ プションに、ECR にプッシュ済みの最新イメージを指定しています。これにより、そのイ メージをプルしてきて、これから行うビルドでのキャッシュとして利用できるようになりま す。結果、ビルド時間の短縮が見込めます。
         # なお、--cache-from オプションに指定してキャッシュとして利用するイメージは、「-- build-arg BUILDKIT_INLINE_CACHE=1」を付けてビルドされている必要があります
         # -t オプションで、イメージにタグ付けを行います。本書では、タグとして latest と、コミット SHA を付けるようにしています。
+
+      - name: Push php image to ecr
+        env:
+          DOCKER_BUILDKIT: 1
+          ECR_REGISTRY: ${{ steps.amazon-ecr-login.outputs.registry }}
+          ECR_REPOSITORY: ${{ env.SYSTEM_NAME }}-${{ env.ENV_NAME }}-${{ env.SERVICE_NAME }}-php
+        run: |
+          docker build \
+            --cache-from=$ECR_REGISTRY/$ECR_REPOSITORY:latest --build-arg BUILDKIT_INLINE_CACHE=1 . \
+            -f infra/docker/php/Dockerfile \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
