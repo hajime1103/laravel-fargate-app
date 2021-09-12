@@ -17,7 +17,7 @@ jobs:
 
     steps:
       - name: Configure aws credentials for prod
-        # if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main'
         # uses では、使用するアクション名を指定します。アクションとは、GitHub Actions 用に用意された、処理のまとまり
         # AWS の認証情報を渡すと、その認証情報に基づき、AWS CLI を使って AWS の操作を行えるようにするアクション
         uses: aws-actions/configure-aws-credentials@v1
@@ -28,7 +28,7 @@ jobs:
           role-to-assume: ${{ secrets.PROD_AWS_ASSUME_ROLE_ARN }} # role-to-assume には Assume Role する対象の IAM ロールの ARN を指定します。今回 のケースであれば、arn:aws:iam::AWS アカウント ID:role/example-prod-foobar-deployer となります
           role-duration-seconds: 1800 # Assume Role によって得られる一時的な権限の有効期間を 指定します。30 分あれば最終的に Fargate へのデプロイも完了できそうなので、本書では 1800 秒 (30 分) を指定することにします。なお、省略した場合は、aws-actions/configure- aws-credentials を使った Assume Role のデフォルト値が適用され、その有効期間は 6 時間 となります
       - name: Set env vars for prod
-        # if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main'
         run: echo "ENV_NAME=prod" >> $GITHUB_ENV # $GITHUB_ENV に環境変数名と値のペアを書き込むことで、GitHub Actions で使用される環境変数を追加できます。
       - uses: actions/checkout@v2 # GitHub 公式のアクションのひとつである actions/checkout を使用し、GitHub Actions の環境に laravel-fargate-app リポジトリのコードをチェックアウト
       - run: docker-compose up -d --build app web
