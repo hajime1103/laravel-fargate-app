@@ -42,6 +42,8 @@ services:
       - type: bind
         source: ./backend
         target: /work/backend
+    environment:
+      - VPC_CIDR=${VPC_CIDR:-172.31.0.0/16}
 
   db:
     build:
@@ -63,3 +65,11 @@ services:
       - MYSQL_USER=${DB_USER:-phper}
       - MYSQL_PASSWORD=${DB_PASS:-secret}
       - MYSQL_ROOT_PASSWORD=${DB_PASS:-secret}
+
+# ローカルで web コンテナ (nginx コンテナ) を起動した時に、default.conf の 「$VPC_CIDR」の部分が正しく展開されるようにします。docker-compose.yml を以下の通り編集してください (太字が編集箇所です)
+# web コンテナに環境変数 VPC_CIDR を設定しています。また、network を設定し、そ の subnet も同じ CIDR になるようにしました
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${VPC_CIDR:-172.31.0.0/16}
